@@ -67,10 +67,10 @@ def call(projectName, DEPLOYTYPE, DSVERSION, deployServer){
                 filename=$(basename "$reqFiles" ."$ext")
                 echo "filename: $filename and ext of file: $ext"
                 cp "$reqFiles" "$tempFolder"
-                reqPath=$(echo "$reqFiles" | sed "s,$WORKSPACE,,g")
+                reqPath=$(echo "$reqFiles" | sed "s,$WORKSPACE,,g")    #remove WORKSPACE path from required file to get required path only
                 echo "req Path: $reqPath"
-                folderN=$(echo "reqPath" | sed "s,$filename.$ext,,g")
-                modified="${folderN:1:-1}"
+                folderN=$(echo "reqPath" | sed "s,$filename.$ext,,g")  #taking only file folderName (/DataStage_CodeFolder/)
+                modified="${folderN:1:-1}"    #remove 1st and last char from folderN (eg. DataStage_Code Folder)
                 echo "folderN: $folderN"
                 echo "modified: $modified"
                 if [ ! -d "$folder/$modified" ];then
