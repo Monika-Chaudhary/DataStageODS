@@ -1,0 +1,11 @@
+repositoryURL=releaseRepoGitSSHUrl.git
+credentialsId=jenkinsGitRepoCredentials
+branch=branchName
+projectName="projectName"
+DEPLOYTYPE="DEV/Pre-Prod/Prod(any one)"
+DSVERSION="projectVersion"
+deployServer="serverHostName"
+authUCDToken="ucdServiceAccountToken"
+Deployment_Environment="ucdEnvName"
+compName="ucdComponentName"
+applicationProcess="ucdApplicationProcess"
