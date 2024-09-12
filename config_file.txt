@@ -1,0 +1,6 @@
+#On this file we put name of dsx file to extract on datastage tool
+
+#dsx_list - Put DSX JOBS belo
+fileName.isx
+
+  #end_list - Paste Rest of the files below
