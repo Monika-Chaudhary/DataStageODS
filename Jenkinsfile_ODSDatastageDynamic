@@ -1,1 +1,300 @@
-a
+@Library('DevOpsSharedLib')_
+
+//deploy build artifacts in all envs automatically
+def getRegionsToDeploy(DeployEnvironmentlist){
+    return DeployEnvironmentlist.split(',')
+}
+
+def getDeployStages(DeployEnvironmentlist, UCDProcess, To, CC, Subject, appName, build_status, Deploy_status, auth, compName, applicationProcess, deployServer, versionId){
+    return getRegionsToDeploy(DeployEnvironmentlist).collectEntries { region ->
+        [
+            (region.trim()): {
+                region=region.trim()
+                stage("Deploy region ${region}"){
+                    try{
+                        echo "${region}"
+                        approvalMap=input(id: "${region}", message: "Please provide approval for deployment in ${region} region", ok: 'Deploy')
+                        stage_step="${STAGE_NAME}"
+                        
+                        //get VersionId env-wise
+                        versionId="DataStage.${BUILD_NUMBER}.${CUR_DATE}.${region}"
+                        
+                        echo "Environment : ${region}"
+                        echo "Component: ${compName}"
+                        echo "App Process : ${applicationProcess}"
+                        echo "version Id : ${versionId}"
+                        
+                        deployRegion=getEnvironmentName(deployenvRegion) //get exact ucd env name
+                        
+                        echo "Going to call Deploy shared function to deploy artifact in environment ${region}"
+                        DataStageODSDeploy(compName, applicationProcess, region, auth, deployServer, versionId, UCDProcess)
+                    }catch(Exception e){
+                        catchBlock(To, CC, Subject, appName, stage_step, e, region, UCDProcess, Deploy_status)
+                    }
+                }
+            }
+        ]
+    }
+}
+
+def catchBlock(String To, String CC, String Subject, String appName, String stage_step, Exception e, String DeploymentEnvironment, String UCDProcess, String Deploy_status){
+    Approver=BUILD_USER_ID
+    echo e.toString()
+    if(e.toString()=="org.jenkinsci.plugins.workflow.steps.FlowInterruptedException" || UCDProcess=="SUCCESS"){
+        echo "${Approver} has aborted in ${DeploymentEnvironment}"
+        Deploy_status="ABORTED"
+        Subject="Deployment Aborted : ${JOB_Name} #${BUILD_NUMBER} ${DeploymentEnvironment}"
+        echo "${DeploymentEnvironment} deploy status : Aborted"
+        EmailFunction(To, CC, Subject, appName, stage_step, Deploy_status, DeploymentEnvironment)
+    }else if(e.toString()=="org.jenkinsci.plugins.workflow.steps.FlowInterruptedException" || UCDProcess=="FAILURE"){
+        Deploy_status="FAILURE"
+        Subject="Deployment FAILURE : ${JOB_Name} #${BUILD_NUMBER} ${DeploymentEnvironment}"
+        echo "${DeploymentEnvironment} deploy status : Failed, current user is ${Approver}"
+        echo "Failed at '${stage_step}' step, ${e}...exiting now..."
+        EmailFunction(To, CC, Subject, appName, stage_step, Deploy_status, DeploymentEnvironment)
+    }else{
+        Deploy_status="FAILURE"
+        Subject="Deployment FAILURE : ${JOB_Name} #${BUILD_NUMBER} ${DeploymentEnvironment}"
+        echo "${DeploymentEnvironment} deploy status : Failed, current user is ${Approver}"
+        echo "Failed at '${stage_step}' step, ${e}...exiting now..."
+        EmailFunction(To, CC, Subject, appName, stage_step, Deploy_status, DeploymentEnvironment)
+    }
+    throw e
+}
+
+node{
+    def appNme="appName"
+    CUR_DATE=sh(script:'(date +"%d-%m-%y")',returnStdout: true).trim()
+    def version_id=""
+    def auth=""
+    def To=""
+    def CC=""
+    def Subject=""
+    def receipient=""
+    def build_status="SUCCESS"
+    def Deploy_status="SUCCESS"
+    def Approver=BUILD_USER_ID
+    def projectName=""
+    def DEPLOYTYPE=""
+    def DSVERSION=""
+    def EnvironmentList=[]
+    def DeployEnvironmentlist=""
+    def DefaultDeployEnvironment=""
+    def compName=""
+    def envName=""
+    def UCDProcess="SUCCESS"
+    def applicationProcess=""
+    def earName=""
+    def warName=""
+    def defaultEnvironment=""
+    def smokeAppProcess=""
+    def versionId=""
+    
+    stage("Checkout SCM"){
+        try{
+            checkout([$class: 'GitSCM', branches: [[name: 'refs/heads/branchNameWhereJenkinsfile']], doGenerateSubmoduleConfigurations: false, extensions: [[$class: 'CleanBeforeCheckout'], [$class: 'WipeWorspace']], submoduleCfg: [], userRemoteConfigs: [[credentialsId: 'credentials', refspec: '+refs/heads/branchNameWhereJenkinsfile:refs/remotes/origin/branchNameWhereJenkinsfile', url: 'sshUrlWhereJenkinsAndTxtRepo']]])
+              
+            def githubRepoURL =sh(returnStdout:true, script: """
+                source \$WORKSPACE/xyztxtFile.txt
+                echo "\$repositoryURL"
+                """
+            )
+            githubRepoURL = githubRepoURL.trim()
+            println(githubRepoURL)
+
+            def branchToPull =sh(returnStdout:true, script: """
+                source \$WORKSPACE/xyztxtFile.txt
+                echo "\$branch"
+                """
+            )
+            branchToPull = branchToPull.trim()
+            println(branchToPull)
+
+            def branchName = "refs/heads" + branchToPull
+
+            def branchRefSpec = "refs/heads" + branchToPull + ":refs/remotes/origin" + branchToPull                                
+
+            def credentialsId_App =sh(returnStdout:true, script: """
+                source \$WORKSPACE/xyztxtFile.txt
+                echo "\$credentialsId_App"
+                """
+            )
+            credentialsId_App = credentialsId_App.trim()
+            println(credentialsId_App)
+              
+            def Environment =sh(returnStdout:true, script: """
+                source \$WORKSPACE/xyztxtFile.txt
+                echo "\$Deployment_Environment"
+                """
+            )
+            
+            To=sh(returnStdout:true, script: """
+                source \$WORKSPACE/xyztxtFile.txt
+                echo "\$emailTo"
+                """
+            )
+            To = To.trim()
+            println(To)
+            
+            receipient=sh(returnStdout:true, script: """
+                source \$WORKSPACE/xyztxtFile.txt
+                echo "\$approverRecipient"
+                """
+            )
+            receipient = receipient.trim()
+            println(receipient)
+            
+            //get projectName, DEPLOYTYPE, DSVERSION, deployServer, compName, applicationProcess, auth from GIT DataStage.txt file
+            
+            //code to separate default env and others deployments env
+            for(int i=0;i<Environment.split(",").length;i++){
+                if(i==0){
+                    DefaultDeployEnvironment=Environment.split(",")[i]
+                }
+                else{
+                    DefaultEnvironmentlist=DefaultEnvironmentlist + Environment.split(",")[i] + ","
+                }
+            }
+            
+            echo "Default Deployment Environment: ${DefaultDeployEnvironment}"
+            echo "Rest of deployment environment: ${DefaultEnvironmentlist}"
+            
+            //remove extra comma from extracted deployment string
+            if (DefaultEnvironmentlist!=""){
+                DefaultEnvironmentlist=DeployEnvironmentlist.substring(0,DefaultEnvironmentlist.length() -1)
+            }
+            
+            
+              
+            checkout([$class: 'GitSCM', branches: [[name: branchName]], doGenerateSubmoduleConfigurations: false, extensions: [[$class: 'CleanBeforeCheckout'], [$class: 'WipeWorspace']], submoduleCfg: [], userRemoteConfigs: [[credentialsId: credentialsId_App, refspec: branchRefSpec, url: githubRepoURL]]])
+              
+        }catch(Exception e){
+            Subject="Build Failure : ${JOB_Name} #${BUILD_NUMBER}"  
+            build_status="FAILURE"
+            echo "${stage_step}"
+            EmailFunction(To, CC, Subject, appName, stage_step, build_status, envName)
+            error "Failed at 'Checkout SCM', exiting now..."
+        }
+    }
+    
+    stage('SAST Analysis with SonarQube'){
+        stage_step="${STAGE_NAME}"
+        try{
+            withSonarQubeEnv('SonarQube'){
+                withCredentials([string(credentialsId: 'credentialsId', variable: 'sonarpass')]) {
+                    sh "sonarScannerPath -e -Dsonar.host.url=sonarQubeIPAddr -Dsonar.login=admin -Dsonar.password='$sonarpass' -Dsonar.projectName=sonarProjectName -Dsonar.projectVersion=1.0 -Dsonar.language=java -Dsonar.source=1.8 -Dsonar.projectKey=sonarProjectKey -Dsonar.sources=$WORKSPACE/ -Dsonar.java.binaries=$WORKSPACE/ -Dsonar.qualitygate.wait=true -Dsonar.qualitygate.timeout=300"  // pathTo/sonar-scanner-version/bin/sonar-scanner
+                      //-Dsonar.java.binaries=$WORKSPACE/WebContent/WEB-INF/lib
+                }
+            }  
+        }catch(Exception e){
+            Subject="Build Failure : ${JOB_Name} #${BUILD_NUMBER}"  
+            build_status="FAILURE"
+            echo "${stage_step}"
+            EmailFunction(To, CC, Subject, appName, stage_step, build_status, envName)
+            error "Failed at 'SAST Analysis with SonarQube', exiting now..."
+        }
+    } 
+    
+    stage('Compile and Build TAR'){
+        stage_step="${STAGE_NAME}"
+        try{
+            withEnv(['JAVA_HOME=pathToJDK']) {
+                sh "/pathTo/ant -f $WORKSPACE/build.xml"
+                
+                DataStageODSBuild(projectName, DEPLOYTYPE, DSVERSION, deployServer)
+            }
+        }catch(Exception e){
+            Subject="Build Failure : ${JOB_Name} #${BUILD_NUMBER}"  
+            build_status="FAILURE"
+            echo "${stage_step}"
+            EmailFunction(To, CC, Subject, appName, stage_step, build_status, envName)
+            error "Failed at 'Compile and Build TAR', exiting now..."
+        }
+    }
+    
+    stage('Nexus Upload of TAR Artifact'){
+        stage_step="${STAGE_NAME}"
+        try{
+            withCredentials([string(credentialsId: 'credentialsId', variable: 'nexus')]) {
+               sh '''
+               CUR_DATE=$(date +"%d-%m-%y")
+               DISTINGUISHER="appName"
+               versionId=${DISTINGUISHER}.${BUILD_NUMBER}.${CUR_DATE}
+               packName=${BUILD_NUMBER}.${CUR_DATE}
+               dir_to_fetch=$WORKSPACE/DataStage-TAR/
+               mkdir -p $WORKSPACE/${versionId}
+               if[ ! -d $dir_to_fetch ]; then
+                    echo "$dir_to_fetch is not valid directory, Exiting"
+                    exit 1
+               fi
+               cd $dir_to_fetch
+               cnt=`ls -1 *.tar.gz | wc -l`
+               if [ $cnt -ls 1 ]; then
+                    echo "Directory is empty. Nothing to upload, Exiting"
+                    exit 1
+               fi
+               ls -1 | while read filename
+               do
+                    cp -rf ${dir_to_fetch}/${filename} $WORKSPACE/${versionId}
+               done
+               chmod 755 ${WORKSPACE}/${versionId}/*.tar.gz
+               curl -v -u admin:${nexus} nexusIpAddr/nexus/content/repositories/repoAppName/${packName} -T ${WORKSPACE}/${versionId}/*.tar.gz  
+               echo "Uploaded ${versionId}/*.tar.gz to Nexus"
+               rm -rf ${WORKSPACE}/${versionId}
+               '''
+            }
+        }catch(Exception e){
+            Subject="Build Failure : ${JOB_Name} #${BUILD_NUMBER}"  
+            build_status="FAILURE"
+            echo "${stage_step}"
+            EmailFunction(To, CC, Subject, appName, stage_step, build_status, envName)
+            error "Failed at 'Nexus Upload of TAR Artifact', exiting now..."
+        }
+    }
+    
+    stage("Default artifact in ${defaultEnvironment}"){
+        try{
+            stage_step="${STAGE_NAME}"    
+            echo "Default env to deploy code : ${defaultEnvironment}"
+            
+            if(DefaultDeployEnvironment.trim().length()>0){
+                envName ="${DefaultDeployEnvironment.trim()}"
+                
+                echo "comp_name : $compName"
+                echo "App Process : ${applicationProcess}"
+                versionId="${DISTINGUISHER}.${BUILD_NUMBER}.${CUR_DATE}.${envName}"
+                echo "Version ID: ${versionId}"
+                echo "calling deploy fun() in default env"
+                DataStageODSDeploy(compName, applicationProcess, envName, auth, deployServer, versionId, UCDProcess)
+            }
+            else{
+                echo "No env provided as default"
+                build_status="FAILURE"
+            }
+            
+        }catch(Exception e){
+            Subject="Build Failure : ${JOB_Name} #${BUILD_NUMBER}"  
+            build_status="FAILURE"
+            echo "${stage_step}"
+            EmailFunction(To, CC, Subject, appName, stage_step, build_status, envName)
+            error "Failed at 'Default Deployment(${envName})', exiting now..."
+        }
+    }
+    
+    //send success mail
+    Subject="Build Success : ${JOB_Name} #${BUILD_NUMBER}" 
+    echo "${stage_step}"
+    EmailFunction(To, CC, Subject, appName, stage_step, build_status, envName)
+    
+    //directly pass map of stages to parallel
+    if(DeployEnvironmentlist.trim().length()>0){
+        echo "calling parallel deployment process"
+        echo "receipient: $receipient"
+        DeploymentApproval(receipient,appName,BUILD_URL)
+        
+        echo "deployment envs: ${DeployEnvironmentlist}"
+        parallel getDeployStages(DeployEnvironmentlist.trim(), UCDProcess, To, CC, Subject, appName, build_status, Deploy_status, auth, compName, applicationProcess, deployServer, versionId)
+        echo "All deployment over"
+    }
+
+}
