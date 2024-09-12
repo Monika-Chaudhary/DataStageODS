@@ -1,0 +1,18 @@
+<project name="projectName" default="buildMenu" basedir=".">
+  <description>dscribe project</description>
+  <property name="debug" value="on"/>
+  <property name="tarDest" value="${basedir}/build"/>
+  <echo>Deleting Directory</echo>
+  <delete dir="build"/>
+
+  <echo>Creating Directory</echo>
+  <mkdir dir="build"/>
+  <target name="buildMenu" description="Create tar to build project">
+    <echo>buildAll Create tar file containing all application elements</echo>
+    <tar compression="gzip" destfile="${tarDest}/datastage.tar.gz">
+      <tarfileset dir="${basedir}">
+        <include name="**"/>
+      </tarfileset>
+    </tar>
+  </target>
+</project>
